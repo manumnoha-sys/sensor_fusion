@@ -1,4 +1,15 @@
-# Sensor Fusion Architecture — Kria KV260
+# Sensor Fusion Architecture — Multi-Platform Overview
+
+## Platforms
+
+| Platform | Board | Rover | Docs |
+|----------|-------|-------|------|
+| Kria KV260 | AMD/Xilinx KV260 (ARM Cortex-A53) | — (camera + IMU only) | [kria/README.md](../kria/README.md) |
+| Jetson Nano | NVIDIA Jetson Nano 4GB (Maxwell GPU) | Sphero RVR (UART) | [jetson/README.md](../jetson/README.md) |
+
+---
+
+# Kria KV260 — Camera + IMU Pipeline
 
 ## System Overview
 

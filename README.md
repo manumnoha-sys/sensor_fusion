@@ -1,10 +1,22 @@
-# Sensor Fusion — AMD/Xilinx Kria KV260
+# Sensor Fusion — Multi-Platform
 
-Real-time sensor fusion for the Kria KV260 Vision AI Starter Kit — fusing an ON Semi AR1335 3MP MIPI camera (via AP1302 ISP) with a 6-DOF IMU, running on Ubuntu 22.04 (aarch64).
+Real-time sensor fusion across two hardware platforms:
+
+| Platform | Hardware | Approach |
+|----------|----------|----------|
+| **Kria KV260** | AMD/Xilinx FPGA SoC + ON Semi AR1335 camera + IMU | Complementary filter, MIPI CSI-2 pipeline |
+| **Jetson Nano** | NVIDIA GPU (Maxwell) + CSI/USB camera + Sphero RVR rover | Extended Kalman Filter, visual odometry |
 
 ---
 
-## Architecture
+## Platform Docs
+
+- **Kria KV260**: [kria/README.md](kria/README.md) · [docs/BRINGUP.md](docs/BRINGUP.md)
+- **Jetson Nano + Sphero RVR**: [jetson/README.md](jetson/README.md) · [jetson/docs/BRINGUP.md](jetson/docs/BRINGUP.md)
+
+---
+
+## Kria KV260 Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -77,26 +89,48 @@ Real-time sensor fusion for the Kria KV260 Vision AI Starter Kit — fusing an O
 
 ```
 sensor_fusion/
-├── Dockerfile                   # ARM64 dev container (xilinx/kria-developer:latest)
-├── requirements.txt
-├── src/
-│   ├── main.py                  # Fusion loop (~30 Hz)
+│
+├── kria/                        # AMD/Xilinx Kria KV260 platform
+│   └── README.md                # Platform overview + quick start
+│
+├── jetson/                      # NVIDIA Jetson Nano + Sphero RVR platform
+│   ├── README.md
+│   ├── requirements.txt
+│   ├── src/
+│   │   ├── main.py              # Asyncio fusion loop (50 Hz)
+│   │   └── fusion/
+│   │       ├── ekf.py           # Extended Kalman Filter (x,y,θ,v,ω)
+│   │       ├── sphero_processor.py  # Sphero RVR UART telemetry
+│   │       ├── imu_processor.py     # Complementary filter + MPU-6050
+│   │       └── camera_processor.py  # CSI/USB camera + LK optical flow
+│   ├── docker/
+│   │   ├── Dockerfile           # L4T r32.7.1 (JetPack 4.6) base
+│   │   ├── build.sh
+│   │   └── run.sh
+│   └── docs/
+│       ├── ARCHITECTURE.md      # Full pipeline + EKF model
+│       └── BRINGUP.md           # Jetson + Sphero RVR bring-up guide
+│
+├── src/                         # Kria canonical source (complementary filter)
+│   ├── main.py
 │   └── fusion/
-│       ├── camera_processor.py  # V4L2 capture + motion detection
+│       ├── camera_processor.py  # V4L2 + motion detection
 │       └── imu_processor.py     # Complementary filter → roll/pitch
-├── gazebo/
-│   ├── worlds/kv260_world.sdf   # Ignition Gazebo world
-│   ├── models/kv260_robot/      # Robot with AR1335-spec camera + IMU
-│   ├── launch/simulate.launch.py# ROS2 Humble launch
-│   ├── config/ar1335_params.yaml# Camera intrinsics + IMU noise params
-│   ├── scripts/sim_bridge.py    # Gz topics → sensor_fusion app
-│   └── docker/Dockerfile        # Simulation container (x86, ROS2 Humble)
+├── Dockerfile                   # Kria arm64 dev container
+├── requirements.txt
+├── gazebo/                      # Ignition Fortress + ROS2 Humble simulation
+│   ├── worlds/kv260_world.sdf
+│   ├── models/kv260_robot/
+│   ├── launch/simulate.launch.py
+│   ├── config/ar1335_params.yaml
+│   ├── scripts/sim_bridge.py
+│   └── docker/Dockerfile
 ├── docker/
 │   ├── build.sh
 │   └── run.sh
 └── docs/
-    ├── ARCHITECTURE.md          # Detailed architecture + pipeline diagram
-    └── BRINGUP.md               # Step-by-step KV260 camera bring-up guide
+    ├── ARCHITECTURE.md          # Multi-platform overview + Kria pipeline
+    └── BRINGUP.md               # Kria KV260 camera bring-up guide
 ```
 
 ---
