@@ -101,4 +101,5 @@ SPHERO_PORT=/dev/ttyUSB0 CAMERA_SOURCE=csi bash docker/run.sh
 ## Docs
 
 - [Architecture & EKF model](docs/ARCHITECTURE.md)
+- [Wiring — Sphero RVR ↔ Jetson Nano](docs/WIRING.md)
 - [Bring-up guide](docs/BRINGUP.md)
