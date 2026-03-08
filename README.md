@@ -10,6 +10,7 @@ Real-time sensor fusion across two embedded hardware platforms, each with its ow
 |----------|-------|---------|---------------|--------|
 | [Kria KV260](kria/README.md) | AMD/Xilinx KV260 (ARM Cortex-A53, FPGA) | AR1335 MIPI camera + 6-DOF IMU | Complementary filter | Camera bring-up in progress |
 | [Jetson Nano](jetson/README.md) | NVIDIA Jetson Nano 4GB (Maxwell GPU) | CSI/USB camera + Sphero RVR (IMU + encoders) | Extended Kalman Filter | Active development |
+| [Raspberry Pi](rpi/) | Raspberry Pi (arm64) | Arducam IMX219 8MP cam0 + IMU | Complementary filter | Active |
 
 ---
 
@@ -38,6 +39,15 @@ sensor_fusion/
 │   └── docs/
 │       ├── ARCHITECTURE.md      # Full Jetson + Sphero pipeline diagram
 │       └── BRINGUP.md           # Step-by-step Jetson + Sphero bring-up
+│
+├── rpi/                         # Raspberry Pi + IMX219 platform
+│   ├── Dockerfile               # arm64 Ubuntu 22.04 + libcamera + picamera2
+│   ├── build.sh
+│   ├── run.sh
+│   └── src/
+│       ├── main.py              # IMX219 cam0 fusion loop
+│       └── fusion/
+│           └── camera_processor.py  # picamera2-based capture
 │
 ├── src/                         # Kria canonical source
 │   ├── main.py                  # Fusion loop (~30 Hz)
@@ -162,6 +172,49 @@ docker run -it --rm sensor-fusion-sim \
 | `/kv260/camera/image_raw` | `sensor_msgs/Image` | AR1335-spec camera |
 | `/kv260/imu/data_raw` | `sensor_msgs/Imu` | 6-DOF IMU @ 200 Hz |
 | `/kv260/odom` | `nav_msgs/Odometry` | Wheel odometry |
+
+---
+
+## Raspberry Pi — Arducam IMX219 cam0
+
+**Board:** Raspberry Pi (arm64) — IMX219 8MP connected to cam0 CSI port
+**Camera:** Arducam for Raspberry Pi V2, IMX219 sensor, 1080p
+
+### Pipeline
+
+```
+Arducam IMX219 (CSI cam0)
+  └─► libcamera / picamera2
+       └─► CameraProcessor (RGB888 → BGR numpy)
+            └─► IMUProcessor (complementary filter)
+                 └─► roll / pitch + motion detection
+```
+
+### Quick Start
+
+```bash
+# On Raspberry Pi — build and run
+cd rpi/
+bash build.sh
+bash run.sh
+
+# Or directly without Docker (if picamera2 installed on host):
+python3 rpi/src/main.py
+```
+
+### Prerequisites on Pi host
+
+```bash
+# Enable camera interface
+sudo raspi-config  # Interface Options → Camera → Enable
+
+# Verify camera detected
+libcamera-hello --list-cameras
+# Should show: 0 : imx219 [...]
+
+# Install picamera2 if not using Docker
+sudo apt install -y python3-picamera2
+```
 
 ---
 
