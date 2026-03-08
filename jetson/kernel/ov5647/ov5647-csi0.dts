@@ -1,0 +1,219 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * OV5647 on CSI0 overlay for Jetson Nano B01 (p3448-0000-b00)
+ *
+ * Adds OV5647 (RPi Camera V1) on cam_i2cmux/i2c@0, I2C addr 0x36
+ * Disables the conflicting imx477/imx219 nodes on CSI0
+ * IMX477 on CSI1 (already enabled by the imx477-dual base overlay) stays
+ *
+ * Compile:
+ *   dtc -@ -I dts -O dtb -o ov5647-csi0.dtbo ov5647-csi0.dts
+ */
+
+/ {
+	overlay-name = "Camera OV5647 CSI0 + IMX477 CSI1";
+	jetson-header-name = "Jetson Nano CSI Connector";
+	compatible = "nvidia,p3449-0000-b00+p3448-0000-b00",
+	             "nvidia,p3449-0000-b00+p3448-0002-b00";
+
+	/* Disable imx477 node on CSI0 */
+	fragment@0 {
+		target-path = "/cam_i2cmux/i2c@0/rbpcv3_imx477_a@1a";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	/* Disable imx219 node on CSI0 */
+	fragment@1 {
+		target-path = "/cam_i2cmux/i2c@0/rbpcv2_imx219_a@10";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	/* Add OV5647 node on the CSI0 I2C bus */
+	fragment@2 {
+		target-path = "/cam_i2cmux/i2c@0";
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ov5647_a: ov5647@36 {
+				compatible = "nvidia,ov5647";
+				reg = <0x36>;
+				status = "okay";
+
+				devnode = "video1";
+				physical_w = "3.674";
+				physical_h = "2.738";
+				sensor_model = "ov5647";
+				use_sensor_mode_id = "true";
+
+				/* reset GPIO handled by driver (GPIO 151 = TEGRA_GPIO(S,7)) */
+
+				mode0 { /* 1920x1080 @ 30fps RAW10 2-lane MIPI */
+					mclk_khz = "24000";
+					num_lanes = "2";
+					tegra_sinterface = "serial_a";
+					phy_mode = "DPHY";
+					discontinuous_clk = "no";
+					dpcm_enable = "false";
+					cil_settletime = "0";
+
+					active_w = "1920";
+					active_h = "1080";
+					mode_type = "bayer";
+					pixel_phase = "bggr";
+					csi_pixel_bit_depth = "10";
+					readout_orientation = "0";
+					line_length = "2500";
+					inherent_gain = "1";
+					mclk_multiplier = "25";
+					pix_clk_hz = "81666666";
+
+					gain_factor = "1";
+					framerate_factor = "1000000";
+					exposure_factor = "1";
+
+					min_gain_val = "0";
+					max_gain_val = "1023";
+					step_gain_val = "1";
+					default_gain = "64";
+
+					min_hdr_ratio = "1";
+					max_hdr_ratio = "1";
+
+					min_framerate = "2000000";
+					max_framerate = "30000000";
+					step_framerate = "1";
+					default_framerate = "30000000";
+
+					min_exp_time = "1";
+					max_exp_time = "1100";
+					step_exp_time = "1";
+					default_exp_time = "400";
+
+					embedded_metadata_height = "0";
+				};
+
+				mode1 { /* 1280x720 @ 60fps RAW10 2-lane MIPI */
+					mclk_khz = "24000";
+					num_lanes = "2";
+					tegra_sinterface = "serial_a";
+					phy_mode = "DPHY";
+					discontinuous_clk = "no";
+					dpcm_enable = "false";
+					cil_settletime = "0";
+
+					active_w = "1280";
+					active_h = "720";
+					mode_type = "bayer";
+					pixel_phase = "bggr";
+					csi_pixel_bit_depth = "10";
+					readout_orientation = "0";
+					line_length = "1972";
+					inherent_gain = "1";
+					mclk_multiplier = "25";
+					pix_clk_hz = "81666666";
+
+					gain_factor = "1";
+					framerate_factor = "1000000";
+					exposure_factor = "1";
+
+					min_gain_val = "0";
+					max_gain_val = "1023";
+					step_gain_val = "1";
+					default_gain = "64";
+
+					min_hdr_ratio = "1";
+					max_hdr_ratio = "1";
+
+					min_framerate = "2000000";
+					max_framerate = "60000000";
+					step_framerate = "1";
+					default_framerate = "60000000";
+
+					min_exp_time = "1";
+					max_exp_time = "756";
+					step_exp_time = "1";
+					default_exp_time = "200";
+
+					embedded_metadata_height = "0";
+				};
+
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					port@0 {
+						reg = <0>;
+						ov5647_out0: endpoint {
+							port-index = <0>;
+							bus-width = <2>;
+							remote-endpoint = <&rbpcv2_imx219_csi_in0>;
+						};
+					};
+				};
+			};
+		};
+	};
+
+	/*
+	 * NVCSI channel 0 port 0 endpoint (CSI input from OV5647).
+	 * Uses target = <&label> so fdtoverlay resolves the phandle from the base DTB.
+	 * remote-endpoint points back to ov5647_out0 (defined in fragment@2).
+	 */
+	fragment@3 {
+		target = <&rbpcv2_imx219_csi_in0>;
+		__overlay__ {
+			status = "okay";
+			port-index = <0>;
+			bus-width = <2>;
+			remote-endpoint = <&ov5647_out0>;
+		};
+	};
+
+	/* NVCSI channel 0 port 1 endpoint (output to VI) — just enable */
+	fragment@4 {
+		target = <&rbpcv2_imx219_csi_out0>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	/* VI port 0 endpoint — just enable */
+	fragment@5 {
+		target = <&rbpcv2_imx219_vi_in0>;
+		__overlay__ {
+			status = "okay";
+			port-index = <0>;
+			bus-width = <2>;
+		};
+	};
+
+	/*
+	 * tegra-camera-platform module0 was the IMX477 on CSI0 (now disabled).
+	 * Redirect it to the OV5647 so nvargus-daemon enumerates it as sensor-id=1.
+	 */
+	fragment@6 {
+		target = <&cam_module0>;
+		__overlay__ {
+			status = "okay";
+			badge = "porg_front_OV5647";
+			position = "front";
+			orientation = "1";
+		};
+	};
+
+	fragment@7 {
+		target = <&cam_module0_drivernode0>;
+		__overlay__ {
+			status = "okay";
+			pcl_id = "v4l2_sensor";
+			devname = "ov5647 7-0036";
+			proc-device-tree = "/proc/device-tree/cam_i2cmux/i2c@0/ov5647@36";
+		};
+	};
+};
