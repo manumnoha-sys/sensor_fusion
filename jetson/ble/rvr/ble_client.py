@@ -19,7 +19,9 @@ from .packet import (
     CMD_DRIVE_HEADING, CMD_SENSOR_CONFIG, CMD_SENSOR_START,
     CMD_SENSOR_STOP, CMD_SENSOR_CLEAR, CMD_SENSOR_STREAM, CMD_SET_ALL_LEDS,
     SENSOR_IMU, SENSOR_ACCEL, SENSOR_GYRO, SENSOR_LOCATOR,
-    SENSOR_ATTRS, SENSOR_RANGES, DATA_SIZE_32BIT, normalize_uint32,
+    SENSOR_ATTRS, SENSOR_RANGES,
+    DATA_SIZE_16BIT, DATA_SIZE_32BIT,
+    normalize_uint16, normalize_uint32,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,8 +50,9 @@ class RVRStreamDelegate(DefaultDelegate):
         """
         Streaming response payload:
           [token_byte] [sensor_data...]
-        token_byte: upper nibble = status (0=ok), lower nibble = token_id (1 or 2)
-        sensor_data: for each sensor in slot order, n_attrs × 4 bytes (uint32 BE)
+        token_byte: upper nibble = status (0=ok), lower nibble = token_id
+        sensor_data (tokens 1-3): n_attrs × 2 bytes (uint16 BE)
+        sensor_data (token 4):    n_attrs × 4 bytes (uint32 BE)
         """
         if len(payload) < 1:
             return
@@ -61,29 +64,32 @@ class RVRStreamDelegate(DefaultDelegate):
 
         raw = payload[1:]
 
-        # Slot 1 (token_id=1): IMU, Accel, Gyro  — in config order
-        # Slot 2 (token_id=2): Locator
-        if token_id == 1:
-            sensors = [SENSOR_IMU, SENSOR_ACCEL, SENSOR_GYRO]
-        elif token_id == 2:
-            sensors = [SENSOR_LOCATOR]
-        else:
+        # One sensor per token; tokens 1-3 are 16-bit, token 4 is 32-bit
+        token_map = {
+            1: (SENSOR_IMU,     2),
+            2: (SENSOR_ACCEL,   2),
+            3: (SENSOR_GYRO,    2),
+            4: (SENSOR_LOCATOR, 4),
+        }
+        entry = token_map.get(token_id)
+        if entry is None:
             return
+        sid, word_size = entry
 
         values = {}
-        offset = 0
-        for sid in sensors:
-            n = SENSOR_ATTRS.get(sid, 0)
-            ranges = SENSOR_RANGES.get(sid, [])
-            needed = n * 4
-            if len(raw) < offset + needed:
-                break
+        n = SENSOR_ATTRS.get(sid, 0)
+        ranges = SENSOR_RANGES.get(sid, [])
+        needed = n * word_size
+        if len(raw) >= needed:
             floats = []
             for i in range(n):
-                raw_uint = _struct.unpack('>I', raw[offset:offset+4])[0]
-                rmin, rmax = ranges[i]
-                floats.append(normalize_uint32(raw_uint, rmin, rmax))
-                offset += 4
+                chunk = raw[i*word_size:(i+1)*word_size]
+                if word_size == 2:
+                    raw_val = _struct.unpack('>H', chunk)[0]
+                    floats.append(normalize_uint16(raw_val, *ranges[i]))
+                else:
+                    raw_val = _struct.unpack('>I', chunk)[0]
+                    floats.append(normalize_uint32(raw_val, *ranges[i]))
             values[sid] = floats
 
         with self._state.lock:
@@ -164,15 +170,16 @@ class RVRBLEClient(object):
         self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_CLEAR)
         time.sleep(0.1)
 
-        # Token 1 (ST): IMU + Accel + Gyro
-        cfg1 = bytes([0x01]) + self._build_slot_config([SENSOR_IMU, SENSOR_ACCEL, SENSOR_GYRO])
-        self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_CONFIG, cfg1)
-        time.sleep(0.1)
-
-        # Token 2 (ST): Locator
-        cfg2 = bytes([0x02]) + self._build_slot_config([SENSOR_LOCATOR])
-        self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_CONFIG, cfg2)
-        time.sleep(0.2)
+        # One sensor per token. IMU/Accel/Gyro use 16-bit data; Locator uses 32-bit.
+        for token_id, sid, dsize in [
+            (0x01, SENSOR_IMU,     DATA_SIZE_16BIT),
+            (0x02, SENSOR_ACCEL,   DATA_SIZE_16BIT),
+            (0x03, SENSOR_GYRO,    DATA_SIZE_16BIT),
+            (0x04, SENSOR_LOCATOR, DATA_SIZE_32BIT),
+        ]:
+            cfg = bytes([token_id, (sid >> 8) & 0xff, sid & 0xff, dsize])
+            self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_CONFIG, cfg)
+            time.sleep(0.1)
 
     def start_streaming(self, interval_ms=STREAM_INTERVAL_MS):
         payload = _struct.pack('>H', interval_ms)

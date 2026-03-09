@@ -52,8 +52,9 @@ SENSOR_GYRO      = 0x0004   # X, Y, Z  (deg/s)         — token 1, ST
 SENSOR_LOCATOR   = 0x0006   # X, Y  (cm)               — token 2, ST
 SENSOR_VELOCITY  = 0x0007   # X, Y  (m/s)              — token 2, ST
 
-# Data size enum value (StreamingDataSizesEnum.thirty_two_bit = 0x02)
-DATA_SIZE_32BIT = 0x02
+# Data size enum values
+DATA_SIZE_16BIT = 0x01  # IMU, Accel, Gyro stream 16-bit scaled integers
+DATA_SIZE_32BIT = 0x02  # Locator streams 32-bit scaled integers
 
 # Number of attributes per sensor
 SENSOR_ATTRS = {
@@ -64,8 +65,8 @@ SENSOR_ATTRS = {
     SENSOR_VELOCITY: 2,   # X, Y
 }
 
-# Value ranges for normalization (uint32 → float)
-# normalize(uint32_val, 0, UINT32_MAX, range_min, range_max)
+# Value ranges for normalization (uint16 or uint32 → float)
+UINT16_MAX = 0xFFFF
 UINT32_MAX = 0xFFFFFFFF
 SENSOR_RANGES = {
     SENSOR_IMU:      [(-180.0, 180.0), (-90.0, 90.0), (-180.0, 180.0)],
@@ -74,6 +75,11 @@ SENSOR_RANGES = {
     SENSOR_LOCATOR:  [(-2147483648.0, 2147483647.0)] * 2,
     SENSOR_VELOCITY: [(-2147483648.0, 2147483647.0)] * 2,
 }
+
+
+def normalize_uint16(raw, range_min, range_max):
+    """Map uint16 [0, UINT16_MAX] → [range_min, range_max]."""
+    return range_min + raw * (range_max - range_min) / UINT16_MAX
 
 
 def normalize_uint32(raw, range_min, range_max):
