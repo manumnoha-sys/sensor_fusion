@@ -39,26 +39,46 @@ CMD_DRIVE_HEADING    = 0x07
 CMD_SENSOR_CONFIG    = 0x39
 CMD_SENSOR_START     = 0x3a
 CMD_SENSOR_STOP      = 0x3b
-CMD_SENSOR_STREAM    = 0xff   # async notify cmd id
+CMD_SENSOR_CLEAR     = 0x3c
+CMD_SENSOR_STREAM    = 0x3d   # async notify cmd id
 
 # LED command
 CMD_SET_ALL_LEDS     = 0x1a
 
-# Sensor slot IDs
-SENSOR_LOCATOR   = 0x0000   # x, y  (2 × float32, cm)
-SENSOR_IMU       = 0x0001   # pitch, roll, yaw  (3 × float32, deg)
-SENSOR_ACCEL     = 0x0002   # ax, ay, az  (3 × float32, G)
-SENSOR_GYRO      = 0x0003   # roll_rate, pitch_rate, yaw_rate (3 × float32, deg/s)
-SENSOR_VELOCITY  = 0x000b   # vx, vy (2 × float32, m/s)
+# Sensor IDs (must match SDK: sensor_streaming_control.py __init_services)
+SENSOR_IMU       = 0x0001   # Pitch, Roll, Yaw  (deg)  — token 1, ST
+SENSOR_ACCEL     = 0x0002   # X, Y, Z  (G)             — token 1, ST
+SENSOR_GYRO      = 0x0004   # X, Y, Z  (deg/s)         — token 1, ST
+SENSOR_LOCATOR   = 0x0006   # X, Y  (cm)               — token 2, ST
+SENSOR_VELOCITY  = 0x0007   # X, Y  (m/s)              — token 2, ST
 
-# Number of float32 fields per sensor
-SENSOR_FIELDS = {
-    SENSOR_LOCATOR:  2,
-    SENSOR_IMU:      3,
-    SENSOR_ACCEL:    3,
-    SENSOR_GYRO:     3,
-    SENSOR_VELOCITY: 2,
+# Data size enum value (StreamingDataSizesEnum.thirty_two_bit = 0x02)
+DATA_SIZE_32BIT = 0x02
+
+# Number of attributes per sensor
+SENSOR_ATTRS = {
+    SENSOR_IMU:      3,   # Pitch, Roll, Yaw
+    SENSOR_ACCEL:    3,   # X, Y, Z
+    SENSOR_GYRO:     3,   # X, Y, Z
+    SENSOR_LOCATOR:  2,   # X, Y
+    SENSOR_VELOCITY: 2,   # X, Y
 }
+
+# Value ranges for normalization (uint32 → float)
+# normalize(uint32_val, 0, UINT32_MAX, range_min, range_max)
+UINT32_MAX = 0xFFFFFFFF
+SENSOR_RANGES = {
+    SENSOR_IMU:      [(-180.0, 180.0), (-90.0, 90.0), (-180.0, 180.0)],
+    SENSOR_ACCEL:    [(-16.0, 16.0)] * 3,
+    SENSOR_GYRO:     [(-2000.0, 2000.0)] * 3,
+    SENSOR_LOCATOR:  [(-2147483648.0, 2147483647.0)] * 2,
+    SENSOR_VELOCITY: [(-2147483648.0, 2147483647.0)] * 2,
+}
+
+
+def normalize_uint32(raw, range_min, range_max):
+    """Map uint32 [0, UINT32_MAX] → [range_min, range_max]."""
+    return range_min + raw * (range_max - range_min) / UINT32_MAX
 
 
 def checksum(payload):

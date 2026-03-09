@@ -5,20 +5,21 @@ Handles connection, sensor streaming, and drive commands.
 import threading
 import time
 import logging
-import struct
 
 from bluepy.btle import Peripheral, ADDR_TYPE_RANDOM, DefaultDelegate, BTLEDisconnectError
 
+import struct as _struct
+
 from .packet import (
-    build_packet, parse_packet, unpack_floats,
+    build_packet, parse_packet,
     FLAG_REQ_RESPONSE, FLAG_ACTIVITY, FLAG_HAS_TARGET,
     PRIMARY, SECONDARY,
     DEV_POWER, DEV_DRIVE, DEV_SENSOR, DEV_LED,
     CMD_WAKE, CMD_BATT, CMD_RESET_YAW, CMD_RAW_MOTORS,
     CMD_DRIVE_HEADING, CMD_SENSOR_CONFIG, CMD_SENSOR_START,
-    CMD_SENSOR_STOP, CMD_SENSOR_STREAM, CMD_SET_ALL_LEDS,
-    SENSOR_LOCATOR, SENSOR_IMU, SENSOR_ACCEL, SENSOR_GYRO,
-    SENSOR_FIELDS,
+    CMD_SENSOR_STOP, CMD_SENSOR_CLEAR, CMD_SENSOR_STREAM, CMD_SET_ALL_LEDS,
+    SENSOR_IMU, SENSOR_ACCEL, SENSOR_GYRO, SENSOR_LOCATOR,
+    SENSOR_ATTRS, SENSOR_RANGES, DATA_SIZE_32BIT, normalize_uint32,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,8 +27,6 @@ logger = logging.getLogger(__name__)
 CMD_HANDLE = 0x000e
 CMD_CCCD   = 0x000f
 
-STREAM_TOKEN = 0x0001
-STREAM_SENSORS = [SENSOR_LOCATOR, SENSOR_IMU, SENSOR_ACCEL, SENSOR_GYRO]
 STREAM_INTERVAL_MS = 80
 
 
@@ -46,27 +45,48 @@ class RVRStreamDelegate(DefaultDelegate):
             self._parse_stream(payload)
 
     def _parse_stream(self, payload):
-        if len(payload) < 2:
+        """
+        Streaming response payload:
+          [token_byte] [sensor_data...]
+        token_byte: upper nibble = status (0=ok), lower nibble = token_id (1 or 2)
+        sensor_data: for each sensor in slot order, n_attrs × 4 bytes (uint32 BE)
+        """
+        if len(payload) < 1:
             return
-        token = struct.unpack('>H', payload[:2])[0]
-        if token != STREAM_TOKEN:
+        token_byte = payload[0]
+        status = (token_byte >> 4) & 0x0f
+        token_id = token_byte & 0x0f
+        if status != 0:
+            return  # invalid data
+
+        raw = payload[1:]
+
+        # Slot 1 (token_id=1): IMU, Accel, Gyro  — in config order
+        # Slot 2 (token_id=2): Locator
+        if token_id == 1:
+            sensors = [SENSOR_IMU, SENSOR_ACCEL, SENSOR_GYRO]
+        elif token_id == 2:
+            sensors = [SENSOR_LOCATOR]
+        else:
             return
-        data = payload[2:]
-        offset = 0
+
         values = {}
-        for sensor_id in STREAM_SENSORS:
-            n = SENSOR_FIELDS.get(sensor_id, 0)
+        offset = 0
+        for sid in sensors:
+            n = SENSOR_ATTRS.get(sid, 0)
+            ranges = SENSOR_RANGES.get(sid, [])
             needed = n * 4
-            if len(data) < offset + needed:
+            if len(raw) < offset + needed:
                 break
-            floats = unpack_floats(data[offset:], n)
-            if floats:
-                values[sensor_id] = floats
-            offset += needed
+            floats = []
+            for i in range(n):
+                raw_uint = _struct.unpack('>I', raw[offset:offset+4])[0]
+                rmin, rmax = ranges[i]
+                floats.append(normalize_uint32(raw_uint, rmin, rmax))
+                offset += 4
+            values[sid] = floats
 
         with self._state.lock:
-            if SENSOR_LOCATOR in values:
-                self._state.loc_x, self._state.loc_y = values[SENSOR_LOCATOR]
             if SENSOR_IMU in values:
                 p, r, y = values[SENSOR_IMU]
                 self._state.pitch   = p
@@ -76,6 +96,8 @@ class RVRStreamDelegate(DefaultDelegate):
                 self._state.accel_x, self._state.accel_y, self._state.accel_z = values[SENSOR_ACCEL]
             if SENSOR_GYRO in values:
                 self._state.gyro_roll, self._state.gyro_pitch, self._state.gyro_yaw = values[SENSOR_GYRO]
+            if SENSOR_LOCATOR in values:
+                self._state.loc_x, self._state.loc_y = values[SENSOR_LOCATOR]
             self._state.timestamp = time.monotonic()
 
 
@@ -130,20 +152,36 @@ class RVRBLEClient(object):
                    mapping + bytes([r, g, b] * 5))
 
     # Sensor streaming
+    def _build_slot_config(self, sensor_ids):
+        """Build config payload: [id_hi, id_lo, data_size_enum] per sensor."""
+        data = b''
+        for sid in sensor_ids:
+            data += bytes([(sid >> 8) & 0xff, sid & 0xff, DATA_SIZE_32BIT])
+        return data
+
     def configure_streaming(self):
-        token_bytes = struct.pack('>H', STREAM_TOKEN)
-        sensor_bytes = b''.join(struct.pack('>H', s) for s in STREAM_SENSORS)
-        self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_CONFIG,
-                   token_bytes + sensor_bytes)
+        # Clear any existing config first
+        self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_CLEAR)
+        time.sleep(0.1)
+
+        # Token 1 (ST): IMU + Accel + Gyro
+        cfg1 = bytes([0x01]) + self._build_slot_config([SENSOR_IMU, SENSOR_ACCEL, SENSOR_GYRO])
+        self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_CONFIG, cfg1)
+        time.sleep(0.1)
+
+        # Token 2 (ST): Locator
+        cfg2 = bytes([0x02]) + self._build_slot_config([SENSOR_LOCATOR])
+        self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_CONFIG, cfg2)
         time.sleep(0.2)
 
     def start_streaming(self, interval_ms=STREAM_INTERVAL_MS):
-        payload = struct.pack('>HH', interval_ms, 0)
+        payload = _struct.pack('>H', interval_ms)
         self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_START, payload)
         logger.info("Sensor streaming started at %dms interval", interval_ms)
 
     def stop_streaming(self):
         self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_STOP)
+        self._send(SECONDARY, DEV_SENSOR, CMD_SENSOR_CLEAR)
 
     # ------------------------------------------------------------------ #
     def connect_and_run(self, address):
