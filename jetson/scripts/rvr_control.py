@@ -95,6 +95,38 @@ class RVR:
     def stop(self):
         self._send(SECONDARY, 0x16, 0x01, bytes([0, 0, 0, 0]))
 
+    def backup(self, speed=60, duration=0.7):
+        """Drive in reverse then stop."""
+        self._send(SECONDARY, 0x16, 0x01, bytes([2, speed, 2, speed]))
+        self._wait(duration)
+        self.stop()
+
+    def drive_watch(self, speed, heading, duration, poll=0.05):
+        """Drive and return True if a stall/error notification arrives early.
+
+        The RVR sends an async error packet (flags byte has bit 0x40 set) when
+        the motors stall against an obstacle.  We watch for that during the leg.
+        """
+        self._delegate.last_response = None
+        data = bytes([speed, (heading >> 8) & 0xff, heading & 0xff, 0])
+        # send drive with response-request so errors come back
+        self._seq = (self._seq + 1) & 0xff
+        flags = 0x1a
+        payload = bytes([flags, SECONDARY, 0x16, 0x07, self._seq]) + data
+        chk = (~sum(payload)) & 0xff
+        pkt = bytes([0x8d]) + payload + bytes([chk, 0xd8])
+        self._p.writeCharacteristic(CMD_HANDLE, pkt, withResponse=False)
+
+        end = time.time() + duration
+        while time.time() < end:
+            self._p.waitForNotifications(poll)
+            resp = self._delegate.last_response
+            if resp and len(resp) >= 2:
+                # error flag is bit 6 of the flags byte (index 1)
+                if resp[1] & 0x40:
+                    return True   # stall / error detected
+        return False
+
     # ------------------------------------------------------------------ #
     # LEDs (secondary processor, dev=0x1a, cmd=0x1a)
     def set_leds(self, r, g, b):
